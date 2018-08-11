@@ -215,13 +215,13 @@ func handler(conn net.Conn) {
 	defer conn.Close()
 
 	bufReader := bufio.NewReader(conn)
-	request, err := bufReader.ReadString('\n')
+	_, err := bufReader.ReadString('\n')
 	if err != nil {
 		log.Print(err)
 		return
 	}
 
-	_, err = fmt.Fprintf(conn, fmt.Sprintf("Hello, %v\n", request))
+	_, err = fmt.Fprintf(conn, fmt.Sprintf("Hello from %v\n", appID))
 	if err != nil {
 		log.Print(err)
 		return
@@ -237,7 +237,7 @@ func main() {
 	initGracefulStop()
 
 	go startDiscovering()
-	go startMessageLoop(3 * time.Second)
+	go startMessageLoop(3 * time.Second) // TODO read from arguments
 
 	listen(handler)
 }
