@@ -28,7 +28,7 @@ func generateUUID() *uuid.UUID {
 
 var appID = generateUUID()
 
-var port = flag.Int("port", 8000, "")
+var port = 8000 // TODO implement custom port
 
 func initGracefulStop() {
 	var gracefulStop = make(chan os.Signal)
@@ -36,7 +36,7 @@ func initGracefulStop() {
 	signal.Notify(gracefulStop, syscall.SIGINT)
 	go func() {
 		_ = <-gracefulStop
-		log.Printf("application has stopped")
+		log.Printf("Application has stopped")
 		os.Exit(0)
 	}()
 }
@@ -107,16 +107,7 @@ func (list *appInstances) append(app appInstance) bool {
 	return false
 }
 
-func getApp() appInstance {
-	otherPort := 8000
-	if otherPort == *port {
-		otherPort = 8001
-	}
-
-	addr := fmt.Sprintf(":%v", otherPort)
-
-	return appInstance{addr}
-}
+var signature = []byte("INSEcosystem_TestTask\n")
 
 func startDiscovering() {
 	go func() {
@@ -130,17 +121,24 @@ func startDiscovering() {
 		}
 		l.SetReadBuffer(maxDatagramSize)
 		for {
-			b := make([]byte, maxDatagramSize)
-			_, src, err := l.ReadFromUDP(b)
+			buffer := make([]byte, maxDatagramSize)
+			n, src, err := l.ReadFromUDP(buffer)
 			if err != nil {
 				log.Fatal(err)
 			}
 
-			if !bytes.Equal(src.IP, *appIP) {
-				inst := appInstance{fmt.Sprintf("%v:8000", src.IP)}
-				if appList.append(inst) {
-					log.Printf("New instance app has added: %v", inst.Address)
-				}
+			if bytes.Equal(src.IP, *appIP) {
+				continue
+			}
+
+			if !bytes.Equal(buffer[:n], signature) {
+				log.Printf("Invalid signature. Skip instance")
+				continue
+			}
+
+			inst := appInstance{fmt.Sprintf("%v:8000", src.IP)}
+			if appList.append(inst) {
+				log.Printf("New instance app has added: %v", inst.Address)
 			}
 		}
 	}()
@@ -152,7 +150,7 @@ func startDiscovering() {
 		}
 		c, err := net.DialUDP("udp", nil, addr)
 		for {
-			c.Write([]byte("hello, world\n"))
+			c.Write(signature)
 			time.Sleep(3 * time.Second)
 		}
 	}()
@@ -190,17 +188,17 @@ func startMessageLoop(period time.Duration) {
 }
 
 func listen(handler func(net.Conn)) {
-	address := fmt.Sprintf(":%v", *port)
+	address := fmt.Sprintf("%v:%v", appIP, port)
 
 	l, err := net.Listen("tcp", address)
 	if err != nil {
 		log.Fatal(err)
 	}
 
-	log.Printf("listening has been started on address `%v`", address)
+	log.Printf("Listening has been started on address `%v`", address)
 	defer func() {
 		l.Close()
-		log.Printf("listening has been stopped on address `%v`", address)
+		log.Printf("Listening has been stopped on address `%v`", address)
 	}()
 
 	for {
@@ -234,9 +232,7 @@ func main() {
 	flag.Parse()
 
 	log.SetOutput(os.Stdout)
-	log.Print("application is starting...")
-	log.Printf("Application UUID %v", appID)
-	log.Printf("Application IP address %v", appIP)
+	log.Printf("Application (%v) is starting...", appID)
 
 	initGracefulStop()
 
