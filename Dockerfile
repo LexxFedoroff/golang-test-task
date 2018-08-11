@@ -1,9 +1,9 @@
 FROM golang:latest
 
-COPY . /go/src/app
+COPY . /go/src/golang-test-task
 
-WORKDIR /go/src/app
+WORKDIR /go/src/golang-test-task
 
-RUN go get ./...
+RUN go get ./... && go build
 
-CMD ["go", "run", "main.go"]
+CMD ["golang-test-task"]
