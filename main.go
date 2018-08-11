@@ -3,7 +3,6 @@ package main
 import (
 	"bufio"
 	"bytes"
-	"encoding/hex"
 	"flag"
 	"fmt"
 	"log"
@@ -61,44 +60,6 @@ func getOutboundIP() *net.IP {
 
 var appIP = getOutboundIP()
 
-func startDiscovering() {
-	go func() {
-		addr, err := net.ResolveUDPAddr("udp", srvAddr)
-		if err != nil {
-			log.Fatal(err)
-		}
-		l, err := net.ListenMulticastUDP("udp", nil, addr)
-		if err != nil {
-			log.Fatal(err)
-		}
-		l.SetReadBuffer(maxDatagramSize)
-		for {
-			b := make([]byte, maxDatagramSize)
-			n, src, err := l.ReadFromUDP(b)
-			if err != nil {
-				log.Fatal("ReadFromUDP failed:", err)
-			}
-
-			if !bytes.Equal(src.IP, *appIP) {
-				log.Println(n, "bytes read from", src)
-				log.Println(hex.Dump(b[:n]))
-			}
-		}
-	}()
-
-	go func() {
-		addr, err := net.ResolveUDPAddr("udp", srvAddr)
-		if err != nil {
-			log.Fatal(err)
-		}
-		c, err := net.DialUDP("udp", nil, addr)
-		for {
-			c.Write([]byte("hello, world\n"))
-			time.Sleep(3 * time.Second)
-		}
-	}()
-}
-
 func sendMessage(address string) *string {
 	conn, err := net.Dial("tcp", address)
 	if err != nil {
@@ -107,6 +68,8 @@ func sendMessage(address string) *string {
 	}
 
 	defer conn.Close()
+
+	conn.SetDeadline(time.Now().Add(time.Second))
 
 	fmt.Fprintf(conn, appID.String()+"\n")
 
@@ -126,16 +89,22 @@ type appInstance struct {
 
 type appInstances struct {
 	mut   sync.RWMutex
-	items []appInstance
+	items map[appInstance]bool
 }
 
-var appList = appInstances{}
+var appList = appInstances{items: make(map[appInstance]bool)}
 
-func (list *appInstances) append(app appInstance) {
+func (list *appInstances) append(app appInstance) bool {
 	list.mut.Lock()
 	defer list.mut.Unlock()
 
-	list.items = append(list.items, app)
+	_, ok := list.items[app]
+	if !ok {
+		list.items[app] = true
+		return true
+	}
+
+	return false
 }
 
 func getApp() appInstance {
@@ -149,6 +118,46 @@ func getApp() appInstance {
 	return appInstance{addr}
 }
 
+func startDiscovering() {
+	go func() {
+		addr, err := net.ResolveUDPAddr("udp", srvAddr)
+		if err != nil {
+			log.Fatal(err)
+		}
+		l, err := net.ListenMulticastUDP("udp", nil, addr)
+		if err != nil {
+			log.Fatal(err)
+		}
+		l.SetReadBuffer(maxDatagramSize)
+		for {
+			b := make([]byte, maxDatagramSize)
+			_, src, err := l.ReadFromUDP(b)
+			if err != nil {
+				log.Fatal(err)
+			}
+
+			if !bytes.Equal(src.IP, *appIP) {
+				inst := appInstance{fmt.Sprintf("%v:8000", src.IP)}
+				if appList.append(inst) {
+					log.Printf("New instance app has added: %v", inst.Address)
+				}
+			}
+		}
+	}()
+
+	go func() {
+		addr, err := net.ResolveUDPAddr("udp", srvAddr)
+		if err != nil {
+			log.Fatal(err)
+		}
+		c, err := net.DialUDP("udp", nil, addr)
+		for {
+			c.Write([]byte("hello, world\n"))
+			time.Sleep(3 * time.Second)
+		}
+	}()
+}
+
 func (list *appInstances) iter() <-chan appInstance {
 	c := make(chan appInstance)
 
@@ -156,7 +165,7 @@ func (list *appInstances) iter() <-chan appInstance {
 		list.mut.RLock()
 		defer list.mut.RUnlock()
 
-		for _, app := range list.items {
+		for app := range list.items {
 			c <- app
 		}
 
@@ -171,8 +180,6 @@ func (list *appInstances) iter() <-chan appInstance {
 func startMessageLoop(period time.Duration) {
 	tickChan := time.Tick(period)
 	for range tickChan {
-		log.Printf("Send messages to other instance")
-
 		for inst := range appList.iter() {
 			response := sendMessage(inst.Address)
 			if response != nil {
@@ -207,12 +214,7 @@ func listen(handler func(net.Conn)) {
 }
 
 func handler(conn net.Conn) {
-	log.Print("connection has been accepted")
-
-	defer func() {
-		conn.Close()
-		log.Print("connection has been closed")
-	}()
+	defer conn.Close()
 
 	bufReader := bufio.NewReader(conn)
 	request, err := bufReader.ReadString('\n')
