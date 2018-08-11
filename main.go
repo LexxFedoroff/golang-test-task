@@ -60,27 +60,28 @@ func getOutboundIP() *net.IP {
 
 var appIP = getOutboundIP()
 
-func sendMessage(address string) *string {
-	conn, err := net.Dial("tcp", address)
+func sendMessage(address string) (string, bool) {
+	dialer := net.Dialer{Timeout: time.Second}
+	conn, err := dialer.Dial("tcp", address)
 	if err != nil {
 		log.Print(err)
-		return nil
+		return "", false
 	}
 
 	defer conn.Close()
 
-	conn.SetDeadline(time.Now().Add(time.Second))
-
 	fmt.Fprintf(conn, appID.String()+"\n")
 
 	bufReader := bufio.NewReader(conn)
+
 	response, err := bufReader.ReadString('\n')
+
 	if err != nil {
 		log.Print(err)
-		return nil
+		return "", false
 	}
 
-	return &response
+	return response, true
 }
 
 type appInstance struct {
@@ -94,7 +95,7 @@ type appInstances struct {
 
 var appList = appInstances{items: make(map[appInstance]bool)}
 
-func (list *appInstances) append(app appInstance) bool {
+func (list *appInstances) add(app appInstance) bool {
 	list.mut.Lock()
 	defer list.mut.Unlock()
 
@@ -105,6 +106,10 @@ func (list *appInstances) append(app appInstance) bool {
 	}
 
 	return false
+}
+
+func (list *appInstances) remove(app appInstance) {
+	delete(list.items, app)
 }
 
 var signature = []byte("INSEcosystem_TestTask\n")
@@ -137,7 +142,7 @@ func startDiscovering() {
 			}
 
 			inst := appInstance{fmt.Sprintf("%v:8000", src.IP)}
-			if appList.append(inst) {
+			if appList.add(inst) {
 				log.Printf("New instance app has added: %v", inst.Address)
 			}
 		}
@@ -178,10 +183,13 @@ func (list *appInstances) iter() <-chan appInstance {
 func startMessageLoop(period time.Duration) {
 	tickChan := time.Tick(period)
 	for range tickChan {
-		for inst := range appList.iter() {
-			response := sendMessage(inst.Address)
-			if response != nil {
-				log.Print(*response)
+		for app := range appList.iter() {
+			response, ok := sendMessage(app.Address)
+			if ok {
+				log.Print(response)
+			} else {
+				appList.remove(app)
+				log.Printf("Applicaiton has removed")
 			}
 		}
 	}
