@@ -5,7 +5,7 @@ import (
 	"net"
 )
 
-// GetOutboundIP returns uutbound IP of service
+// GetOutboundIP returns outbound IP of service
 func GetOutboundIP() *net.IP {
 	conn, err := net.Dial("udp", "8.8.8.8:80")
 	if err != nil {

@@ -41,7 +41,8 @@ func (app app) listenMulticast() {
 			continue
 		}
 
-		inst := discoveredApp{fmt.Sprintf("%v:8000", src.IP)}
+		var port = 8000 // TODO read port from buffer
+		inst := discoveredApp{fmt.Sprintf("%v:%v", src.IP, port)}
 		if app.appList.add(inst) {
 			log.Printf("New instance app has added: %v", inst.Address)
 		}

@@ -32,6 +32,9 @@ func (list *discoveredAppList) add(app discoveredApp) bool {
 }
 
 func (list *discoveredAppList) remove(app discoveredApp) {
+	list.mut.Lock()
+	defer list.mut.Unlock()
+
 	delete(list.items, app)
 }
 
